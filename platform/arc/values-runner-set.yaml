@@ -1,0 +1,39 @@
+# Helm values for the ARC runner scale set.
+#
+# The Helm *release name* becomes the label workflows target, so this set is
+# installed as `arc-rdev` and workflows say `runs-on: arc-rdev`. There is no
+# `self-hosted` label with runner scale sets — the release name is the whole label.
+
+githubConfigUrl: https://github.com/sliu2200899/self-hosted-ci-cd
+
+# Pre-created by scripts/20-install-arc.sh from the PAT in $GH_PAT.
+githubConfigSecret: arc-github-token
+
+# Scale to zero when idle so no node capacity is held between builds; the AKS
+# cluster autoscaler adds nodes when a burst arrives.
+minRunners: 0
+maxRunners: 3
+
+# Docker-in-Docker: gives each ephemeral runner pod its own Docker daemon so
+# `docker build` works. Requires privileged containers — verified allowed on this
+# cluster (no Azure Policy assignments, no Gatekeeper constraints, no Pod Security
+# enforce labels).
+containerMode:
+  type: dind
+
+template:
+  spec:
+    containers:
+      - name: runner
+        image: ghcr.io/actions/actions-runner:latest
+        command: ["/home/runner/run.sh"]
+        resources:
+          # These nodes are Standard_D2s_v3 (2 vCPU / 8 GiB). Requests are kept
+          # modest so a runner always fits alongside system pods; limits leave
+          # headroom for a container build without starving the kubelet.
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: "1"
+            memory: 2Gi

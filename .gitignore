@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Terraform
+#
+# State is excluded because AKS state contains live credentials: kube_config_raw,
+# client_key, client_certificate, and log-analytics shared keys. Anyone with the
+# state file has cluster admin. Use a remote backend (the `tfstate` resource group
+# already exists in this subscription) rather than committing it.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+
+# tfvars hold service principal secrets. Keep them local; document the required
+# variables in aks-terraform/README.md instead.
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+.terraformrc
+terraform.rc
