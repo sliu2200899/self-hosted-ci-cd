@@ -25,6 +25,49 @@ pod is destroyed — every job gets a clean machine
 Runners are **ephemeral**: one pod per job, destroyed afterwards. There is no state to
 leak between builds, and no runner to patch.
 
+### The custom resources behind that diagram
+
+The diagram above says "the controller creates a pod", which is true but compressed.
+Four CRDs are involved, and knowing which is which makes debugging much faster:
+
+```
+AutoscalingRunnerSet        ← Helm creates this; holds config, owns everything below
+   ├── AutoscalingListener  ← its controller runs the listener pod that polls GitHub
+   │        │ job arrives → patches replicas
+   │        ▼
+   └── EphemeralRunnerSet   ← spec.replicas — a ReplicaSet analogue, the scaling knob
+             │
+             ▼
+        EphemeralRunner     ← ONE per job (status carries jobId, jobWorkflowRef)
+             │
+             ▼
+           Pod              ← runner container + dind sidecar
+```
+
+| CRD | Role |
+|---|---|
+| `AutoscalingRunnerSet` | Desired state and GitHub registration. The parent object. |
+| `AutoscalingListener` | Long-polls GitHub; translates queued jobs into a replica count |
+| `EphemeralRunnerSet` | Holds `replicas`; scales the fleet |
+| `EphemeralRunner` | One job, one object, one pod |
+
+Two things commonly get misattributed. The **listener never creates pods** — it only
+patches a replica count. And the **AutoscalingRunnerSet never creates pods either**;
+it is configuration plus ownership. Pod creation happens at the `EphemeralRunner` level.
+
+The "controller" is a single manager binary in `arc-systems` running a separate
+reconcile loop per CRD kind, which is why one pod serves every scale set across
+every repo.
+
+Useful when debugging:
+
+```bash
+kubectl -n arc-runners get autoscalingrunnersets,autoscalinglisteners,ephemeralrunnersets,ephemeralrunners
+# Which job is a given runner executing?
+kubectl -n arc-runners get ephemeralrunners -o custom-columns=\
+'NAME:.metadata.name,PHASE:.status.phase,JOB:.status.jobDisplayName,WORKFLOW:.status.jobWorkflowRef'
+```
+
 ## Two namespaces
 
 | Namespace | Contains |
