@@ -7,21 +7,19 @@ venv/
 
 # Terraform
 #
-# State is excluded because AKS state contains live credentials: kube_config_raw,
-# client_key, client_certificate, and log-analytics shared keys. Anyone with the
-# state file has cluster admin. Use a remote backend (the `tfstate` resource group
-# already exists in this subscription) rather than committing it.
+# The cluster provisioning code is kept out of this repo entirely. It holds live
+# credentials: the tfvars carries a service principal secret, and AKS state
+# contains kube_config_raw plus client certificates — anyone with those has
+# cluster admin.
+aks-terraform/
+
+# Belt and braces, in case Terraform is ever run elsewhere in the tree.
 .terraform/
 *.tfstate
 *.tfstate.*
 *.tfplan
-crash.log
-crash.*.log
-
-# tfvars hold service principal secrets. Keep them local; document the required
-# variables in aks-terraform/README.md instead.
 *.tfvars
 *.tfvars.json
 !*.tfvars.example
-.terraformrc
-terraform.rc
+crash.log
+crash.*.log
