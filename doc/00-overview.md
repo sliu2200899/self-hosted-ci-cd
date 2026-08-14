@@ -7,8 +7,8 @@ pods on our own AKS cluster, and CD is a pull-based GitOps loop in the same clus
 
 | Phase | Scope | Status |
 |---|---|---|
-| **1a** | CI — GitHub Actions jobs on self-hosted ARC runners in AKS, producing an image in GHCR | current |
-| **1b** | CD — Argo CD pulls from git and deploys that image | not started |
+| **1a** | CI — GitHub Actions jobs on self-hosted ARC runners in AKS, producing an image in GHCR | done |
+| **1b** | CD — Argo CD pulls from git and deploys that image | current |
 | **2** | Buildkite agents replace the GitHub Actions half of CI | not started |
 
 ## Why the phases split here
@@ -34,9 +34,20 @@ merge to master ────> job `test`  ──> job `build`   (build AND publi
                                             ghcr.io/sliu2200899/self-hosted-ci-cd/sample-app
                                               :sha-<short>
                                               :latest
+                                              │
+                                     job `bump` commits that tag into
+                                     deploy/overlays/dev/kustomization.yaml
+                                              │
+                     ┌────────────────────────┘
+                     ▼
+             Argo CD (in-cluster) polls git, renders Kustomize,
+             applies the diff → Deployment in ns sample-app rolls
 ```
 
 Merging a PR *is* a push to `master` — that is the trigger, not a separate event.
+
+CI never touches the cluster and holds no cluster credentials. Argo CD never talks to
+CI. The **only** thing joining them is a commit that changes an image tag.
 
 ## Components
 
@@ -45,20 +56,22 @@ Merging a PR *is* a push to `master` — that is the trigger, not a separate eve
 | ARC controller | AKS ns `arc-systems` | Watches GitHub for queued jobs |
 | Runner scale set `arc-rdev` | AKS ns `arc-runners` | Ephemeral runner pods, scale 0→3 |
 | Sample app | `app/` | FastAPI service; something real to test and build |
-| CI workflow | `.github/workflows/ci.yml` | Test on PR, build+push on merge |
+| CI workflow | `.github/workflows/ci.yml` | Test on PR, build+push+bump on merge |
 | GHCR | github.com | Image registry |
+| Argo CD | AKS ns `argocd` | Reconciles git → cluster |
+| Deployed app | AKS ns `sample-app` | Deployment (2 replicas) + Service |
 
 ## Repository layout
 
 ```
 app/                  Python service, tests, Dockerfile
+deploy/               Kustomize manifests (base + overlays/dev)
 platform/arc/         Helm values for the runner scale set
+platform/argocd/      The Argo CD Application
 scripts/              Repeatable install scripts
 .github/workflows/    CI definition
 doc/                  This documentation
 ```
-
-`deploy/` and `platform/argocd/` will appear in Phase 1b.
 
 ## Read next
 
@@ -68,3 +81,4 @@ doc/                  This documentation
 4. [The CI workflow](04-ci-workflow.md)
 5. [Verification](05-verification.md)
 6. [Runbook](06-runbook.md)
+7. [CD with Argo CD](07-argocd.md)

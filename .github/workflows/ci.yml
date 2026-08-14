@@ -57,6 +57,8 @@ jobs:
   build:
     needs: test
     runs-on: arc-rdev
+    outputs:
+      sha_tag: ${{ steps.meta.outputs.sha_tag }}
     # Runs on BOTH events, but only publishes on push to master. On a PR this is
     # build validation: it proves the Dockerfile still builds before the merge,
     # without publishing an image from unreviewed code.
@@ -108,3 +110,54 @@ jobs:
           else
             echo "Build validated — not published (pull request)." >> "$GITHUB_STEP_SUMMARY"
           fi
+
+  # The handoff to CD. Writes the freshly published tag into the Kustomize
+  # overlay and commits it; Argo CD sees that commit and rolls the Deployment.
+  # CI never talks to the cluster — a git commit is the entire interface.
+  bump:
+    needs: build
+    runs-on: arc-rdev
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # The runner image is minimal — no kustomize, no yq. Install into a temp
+      # dir rather than a system path, since the runner is not root.
+      - name: Install kustomize
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          cd "$RUNNER_TEMP/bin"
+          curl -sSL "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Pin the new image tag
+        working-directory: deploy/overlays/dev
+        run: |
+          kustomize edit set image "${IMAGE}=${IMAGE}:${{ needs.build.outputs.sha_tag }}"
+          git diff --stat
+
+      - name: Commit and push
+        run: |
+          # Bot identity, so these commits are visibly machine-made in history.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # A rebuild of an unchanged commit is a no-op, not a failure.
+          if git diff --quiet; then
+            echo "Image tag already current — nothing to commit." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          git add deploy/overlays/dev/kustomization.yaml
+          git commit -m "Deploy ${{ needs.build.outputs.sha_tag }}
+
+          Automated image tag bump from ${{ github.sha }}."
+
+          # No infinite loop: commits pushed with GITHUB_TOKEN do not trigger
+          # workflow runs, and the push paths filter excludes deploy/** anyway.
+          git push
+
+          echo "Bumped dev overlay to \`${{ needs.build.outputs.sha_tag }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Argo CD will sync within ~3 minutes." >> "$GITHUB_STEP_SUMMARY"

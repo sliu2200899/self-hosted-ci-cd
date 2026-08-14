@@ -100,6 +100,39 @@ Steps:
 A useful side effect: the PR build populates the layer cache, so the post-merge publish
 is mostly re-tagging layers that were already built.
 
+## Job `bump` — the handoff to CD
+
+Runs only on push to `master`, after `build`. It rewrites the image tag in the Kustomize
+overlay and commits:
+
+```bash
+kustomize edit set image <image>=<image>:sha-<short-sha>
+git commit && git push
+```
+
+The tag comes from `needs.build.outputs.sha_tag`, so `build` and `bump` cannot disagree
+about which image was published.
+
+`kustomize` is downloaded in the job because the runner image does not ship it — the
+same "assume nothing is installed" rule as Python. It installs into `$RUNNER_TEMP/bin`
+rather than a system path, since the runner is not root.
+
+**CI still never touches the cluster.** It has no kubeconfig and no cluster credentials;
+its only privilege is `contents: write` on this repository. Deployment happens because
+Argo CD reads the commit. See [07-argocd.md](07-argocd.md).
+
+### Why this does not loop forever
+
+`bump` commits to the repo that triggers CI. Two independent guards:
+
+1. **Commits pushed with `GITHUB_TOKEN` do not trigger workflow runs** — deliberate
+   GitHub behaviour, and the primary guard.
+2. **The `paths` filter** covers `app/**` and the workflow file. `bump` only touches
+   `deploy/**`, so it would not match even if guard 1 disappeared.
+
+A rebuild where the tag is unchanged is a no-op: the job checks `git diff --quiet` and
+exits cleanly rather than creating an empty commit.
+
 ## Image tags
 
 ```

@@ -97,8 +97,84 @@ the most likely first-run failure in Phase 1b.
 
 ## Phase 1a is done when
 
-- [ ] A PR runs `test` and `build` on pods in your cluster, publishing nothing
-- [ ] A merge to `master` runs both jobs and publishes
-- [ ] A `sha-<short-sha>` image tag exists in GHCR matching the merge commit
-- [ ] That image starts and reports the expected version
-- [ ] Runners return to zero when idle
+- [x] A PR runs `test` and `build` on pods in your cluster, publishing nothing
+- [x] A merge to `master` runs both jobs and publishes
+- [x] A `sha-<short-sha>` image tag exists in GHCR matching the merge commit
+- [x] That image starts and reports the expected version
+- [x] Runners return to zero when idle
+
+---
+
+# Phase 1b verification — the GitOps loop
+
+## 8. Argo CD reaches Synced / Healthy
+
+```bash
+kubectl -n argocd get application sample-app
+kubectl -n sample-app get deploy,pods,svc
+```
+
+Expect `Synced` / `Healthy` and two Running pods.
+
+If it is stuck, it is almost always the deploy key:
+
+```bash
+kubectl -n argocd get application sample-app -o jsonpath='{.status.conditions}'
+kubectl -n argocd logs deploy/argocd-repo-server --tail=50
+```
+
+A permission error means the public key was never added to the repo, or the repository
+Secret's `url` does not match the Application's `repoURL` character for character.
+
+## 9. The app serves
+
+```bash
+kubectl -n sample-app port-forward svc/sample-app 8000:80
+curl -s localhost:8000/healthz   # {"status":"ok"}
+curl -s localhost:8000/          # {"app":"sample-app","version":"..."}
+```
+
+## 10. Self-heal — proof git is the source of truth
+
+This is the test that distinguishes GitOps from a one-shot deployment:
+
+```bash
+kubectl -n sample-app scale deploy/sample-app --replicas=5
+kubectl -n sample-app get deploy sample-app -w
+```
+
+Argo CD should revert it to 2 within a minute. If it does not, `selfHeal` is
+misconfigured — and git is only describing the *initial* state, not the current one.
+
+## 11. The full loop
+
+The end-to-end test of both phases together:
+
+1. Change the `APP_VERSION` default in `app/main.py` (e.g. `0.1.1` → `0.2.0`).
+2. Open a PR, confirm `test` and `build` pass and publish nothing, then merge.
+3. Watch CI: `test` → `build` → `bump`.
+4. Confirm `bump` committed — a new `Deploy sha-...` commit by `github-actions[bot]`
+   on `master`, touching only `deploy/overlays/dev/kustomization.yaml`.
+5. Confirm that commit did **not** trigger another CI run.
+6. Wait ~3 minutes (or force a sync), then:
+
+```bash
+kubectl -n sample-app rollout status deploy/sample-app
+kubectl -n sample-app port-forward svc/sample-app 8000:80
+curl -s localhost:8000/          # reports the NEW version
+```
+
+Force a sync instead of waiting:
+
+```bash
+kubectl -n argocd patch application sample-app --type merge \
+  -p '{"operation":{"sync":{"revision":"master"}}}'
+```
+
+## Phase 1b is done when
+
+- [ ] `sample-app` Application is `Synced` / `Healthy`
+- [ ] The app serves `/healthz` and `/` from the cluster
+- [ ] A manual `kubectl scale` is reverted by self-heal
+- [ ] A merge produces a `bump` commit that does **not** retrigger CI
+- [ ] The new version is live without anyone running `kubectl apply`
