@@ -29,6 +29,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The actions/runner image is minimal: it ships python3 but no `python`
+      # and no pip at all. Unlike GitHub-hosted ubuntu-latest, nothing is
+      # preinstalled — so the toolchain has to be set up explicitly.
+      # Pinned to the same minor as the Dockerfile's base image so tests run
+      # against the interpreter that ships in production.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
       - name: Install dependencies
         working-directory: app
         run: |

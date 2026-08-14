@@ -13,9 +13,43 @@ The `paths` filter on `push` means unrelated commits — docs, scripts, ARC valu
 not trigger a rebuild. It also becomes load-bearing in Phase 1b, when CI starts writing
 image tags back into `deploy/**`: that write must not retrigger CI.
 
+## The runner image is minimal — assume nothing is installed
+
+The single biggest difference from GitHub-hosted runners. `ubuntu-latest` ships with
+Python, Node, Go, the AWS CLI and hundreds of other tools preinstalled. The
+`ghcr.io/actions/actions-runner` image ships almost none of it.
+
+Verified by running the image directly:
+
+```
+python:  MISSING
+python3: /usr/bin/python3
+pip:     MISSING
+pip3:    MISSING
+docker:  /usr/bin/docker      (from the dind sidecar)
+git:     /usr/bin/git
+```
+
+So `python -m pip install ...` — copied from any normal workflow — fails instantly with
+`python: command not found`. This is what broke the first run of this pipeline.
+
+**Rule: every toolchain the workflow needs must be set up explicitly**, with a
+`setup-*` action or an install step. When porting a workflow from GitHub-hosted
+runners, this is the first thing to check.
+
+To see what an image actually contains before debugging a failed run:
+
+```bash
+kubectl run runner-probe --rm -i --restart=Never \
+  --image=ghcr.io/actions/actions-runner:latest \
+  --command -- bash -lc 'command -v python3 pip docker git'
+```
+
 ## Job `test`
 
-Runs on both events. Installs `requirements-dev.txt` (which pulls in the runtime
+Runs on both events. Uses `actions/setup-python@v5` pinned to **3.13** — the same minor
+as the Dockerfile's base image, so tests run against the interpreter that ships in
+production. Then installs `requirements-dev.txt` (which pulls in the runtime
 requirements via `-r`) and runs `pytest -v` from the `app/` directory.
 
 This is the gate. `build-push` declares `needs: test`, so a red test means no image is
