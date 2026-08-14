@@ -8,8 +8,8 @@ pods on our own AKS cluster, and CD is a pull-based GitOps loop in the same clus
 | Phase | Scope | Status |
 |---|---|---|
 | **1a** | CI — GitHub Actions jobs on self-hosted ARC runners in AKS, producing an image in GHCR | done |
-| **1b** | CD — Argo CD pulls from git and deploys that image | current |
-| **2** | Buildkite agents replace the GitHub Actions half of CI | not started |
+| **1b** | CD — Argo CD pulls from git and deploys that image | done |
+| **2** | Buildkite agents replace the GitHub Actions half of CI | next |
 
 ## Why the phases split here
 

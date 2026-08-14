@@ -173,8 +173,13 @@ kubectl -n argocd patch application sample-app --type merge \
 
 ## Phase 1b is done when
 
-- [ ] `sample-app` Application is `Synced` / `Healthy`
-- [ ] The app serves `/healthz` and `/` from the cluster
-- [ ] A manual `kubectl scale` is reverted by self-heal
-- [ ] A merge produces a `bump` commit that does **not** retrigger CI
-- [ ] The new version is live without anyone running `kubectl apply`
+- [x] `sample-app` Application is `Synced` / `Healthy`
+- [x] The app serves `/healthz` and `/` from the cluster
+- [x] A manual `kubectl scale` is reverted by self-heal
+- [x] A merge produces a `bump` commit that does **not** retrigger CI
+- [x] The new version is live without anyone running `kubectl apply`
+
+Verified on the `cd/argocd` merge: `bump` committed `Deploy sha-354ac75` touching only
+`deploy/overlays/dev/kustomization.yaml`, Argo CD synced, and the Deployment came up
+running exactly `sample-app:sha-354ac75`. A manual scale to 5 replicas was reverted to
+2 within about ten seconds.

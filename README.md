@@ -9,7 +9,7 @@ the same cluster.
 | Phase | Scope | Status |
 |---|---|---|
 | **1a** | CI — Actions jobs on self-hosted ARC runners in AKS → image in GHCR | **done** |
-| **1b** | CD — Argo CD deploys that image | **in progress** |
+| **1b** | CD — Argo CD deploys that image | **done** |
 | **2** | Buildkite agents replace the Actions half of CI | not started |
 
 ## How it works
