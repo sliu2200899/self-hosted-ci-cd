@@ -2,9 +2,10 @@
 
 ## Bootstrapping a fresh cluster
 
-Everything CI needs is either in this repo or outside the cluster, so rebuilding after a
-teardown is three commands. **There is no separate CRD step** — the four
-`actions.github.com` CRDs ship with the controller chart.
+Everything is either committed here or lives outside the cluster, so rebuilding after a
+teardown is a handful of scripts. **There is no separate CRD step** — the four
+`actions.github.com` CRDs ship with the ARC controller chart, and Argo CD's ship with
+its own.
 
 ```bash
 # 1. Point kubectl at the new cluster. Mandatory after any recreate: the AKS API
@@ -16,11 +17,29 @@ kubectl get nodes          # expect Ready nodes before continuing
 #    (classic, `repo` scope).
 export GH_PAT=ghp_xxxxxxxx
 
-# 3. Controller + CRDs + runner scale set, in one idempotent step.
+# 3. CI — ARC controller + CRDs + the arc-rdev runner scale set. Idempotent.
 ./scripts/20-install-arc.sh
+
+# 4. CD — Argo CD via Helm, its repo credentials, then the Application.
+./scripts/10-install-argocd.sh
+./scripts/11-argocd-repo-key.sh
+./scripts/30-bootstrap-app.sh
 ```
 
-Then confirm registration before pushing any code:
+CI and CD are independent, so the order of steps 3 and 4 does not matter.
+
+### The deploy key usually needs no GitHub action
+
+`11-argocd-repo-key.sh` reuses the key at `~/.ssh/argocd-self-hosted-ci-cd` if it
+exists and only recreates the in-cluster Secret. The private key lives on your machine
+and its public half is already registered on the repo, so **a new cluster does not need
+a new deploy key**. The script generates a keypair — and prints one to add — only when
+that file is missing, e.g. on a new laptop.
+
+### Verify before pushing any code
+
+A job queued against a label no runner provides waits forever with no error, so confirm
+registration first:
 
 ```bash
 kubectl -n arc-systems get pods    # controller + arc-rdev-...-listener, both Running
@@ -29,13 +48,25 @@ kubectl get autoscalinglisteners -A
 
 and check `arc-rdev` appears at repo → Settings → Actions → Runners.
 
+For CD:
+
+```bash
+kubectl -n argocd get application sample-app    # expect Synced / Healthy
+kubectl -n sample-app get deploy,pods
+```
+
 ### What does not need redoing
 
 | Thing | Why |
 |---|---|
 | GHCR package + its public visibility | Lives on GitHub, not in the cluster |
-| The CI workflow, app, Helm values | Already committed to `master` |
+| CI workflow, app, manifests, Helm values | Already committed to `master` |
 | GitHub-side runner registration | Recreated by the install script |
+| The GitHub deploy key | Still valid; only the in-cluster Secret is recreated |
+| Knowing which image version to deploy | Pinned in `deploy/overlays/dev`, so Argo CD restores the exact previous state from git |
+
+That last row is the point of GitOps: the cluster is disposable because git already
+describes what belongs on it.
 
 The listener pod runs in **`arc-systems`** (the controller's namespace), not
 `arc-runners` — only the ephemeral runner pods appear in `arc-runners`, and only while
@@ -59,6 +90,21 @@ kubectl -n arc-systems logs -l app.kubernetes.io/name=gha-rs-controller --tail=1
 
 # Reinstall / reconcile everything
 export GH_PAT=ghp_xxxx && ./scripts/20-install-arc.sh
+
+# --- Argo CD ---
+kubectl -n argocd get application sample-app
+kubectl -n sample-app get deploy,pods,svc
+
+# Why is a sync failing?
+kubectl -n argocd get application sample-app -o jsonpath='{.status.conditions}'
+kubectl -n argocd logs deploy/argocd-repo-server --tail=50
+
+# Force a sync instead of waiting ~3 minutes
+kubectl -n argocd patch application sample-app --type merge \
+  -p '{"operation":{"sync":{"revision":"master"}}}'
+
+# UI
+kubectl -n argocd port-forward svc/argocd-server 8080:443
 ```
 
 ## Troubleshooting

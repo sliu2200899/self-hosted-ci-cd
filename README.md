@@ -49,11 +49,12 @@ scripts/              Repeatable install scripts
 doc/                  Documentation
 ```
 
-## Setting up CI on a fresh cluster
+## Setting up on a fresh cluster
 
-Everything CI needs is either committed here or lives outside the cluster, so a rebuild
-after teardown is three commands. **There is no separate CRD step** — the four
-`actions.github.com` CRDs ship with the controller chart.
+Everything is either committed here or lives outside the cluster, so a rebuild after
+teardown is a handful of scripts. **There is no separate CRD step** — the four
+`actions.github.com` CRDs ship with the ARC controller chart, and Argo CD's ship with
+its own.
 
 ```bash
 # 0. Once per machine
@@ -72,11 +73,17 @@ export GH_PAT=ghp_xxxxxxxx
 # 3. CI: controller + CRDs + the arc-rdev runner scale set. Idempotent.
 ./scripts/20-install-arc.sh
 
-# 4. CD: Argo CD, its read-only deploy key, and the Application.
+# 4. CD: Argo CD via Helm, its read-only deploy key, and the Application.
+#    Independent of step 3 — order does not matter.
 ./scripts/10-install-argocd.sh
-./scripts/11-argocd-repo-key.sh    # prints a public key to add at Settings → Deploy keys
+./scripts/11-argocd-repo-key.sh
 ./scripts/30-bootstrap-app.sh
 ```
+
+`11-argocd-repo-key.sh` reuses the key at `~/.ssh/argocd-self-hosted-ci-cd` if present
+and only recreates the in-cluster Secret, so **a new cluster needs no new deploy key**.
+It generates one — and prints a public key to add at Settings → Deploy keys — only when
+that file is missing.
 
 ### Verify before pushing any code
 
@@ -88,7 +95,12 @@ kubectl -n arc-systems get pods        # controller AND arc-rdev-...-listener, b
 kubectl get autoscalinglisteners -A
 ```
 
-and check `arc-rdev` is listed at repo → Settings → Actions → Runners.
+and check `arc-rdev` is listed at repo → Settings → Actions → Runners. For CD:
+
+```bash
+kubectl -n argocd get application sample-app    # expect Synced / Healthy
+kubectl -n sample-app get deploy,pods
+```
 
 > The listener runs in **`arc-systems`**, not `arc-runners`. Only ephemeral runner pods
 > appear in `arc-runners`, and only while a job is executing — an empty `arc-runners`
@@ -99,8 +111,10 @@ and check `arc-rdev` is listed at repo → Settings → Actions → Runners.
 | Thing | Why |
 |---|---|
 | GHCR package and its public visibility | Lives on GitHub, not in the cluster |
-| CI workflow, app, Helm values | Already committed to `master` |
+| CI workflow, app, manifests, Helm values | Already committed to `master` |
 | GitHub-side runner registration | Recreated by the install script |
+| The GitHub deploy key | Still valid; only the in-cluster Secret is recreated |
+| Knowing which image version to deploy | Pinned in `deploy/overlays/dev`, so Argo CD restores the exact previous state from git |
 
 Then follow [doc/05-verification.md](doc/05-verification.md) for the PR round trip, or
 [doc/06-runbook.md](doc/06-runbook.md) when something misbehaves.
