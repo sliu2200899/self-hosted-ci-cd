@@ -1,5 +1,46 @@
 # Runbook
 
+## Bootstrapping a fresh cluster
+
+Everything CI needs is either in this repo or outside the cluster, so rebuilding after a
+teardown is three commands. **There is no separate CRD step** — the four
+`actions.github.com` CRDs ship with the controller chart.
+
+```bash
+# 1. Point kubectl at the new cluster. Mandatory after any recreate: the AKS API
+#    server FQDN contains a random suffix that changes, so the old context is dead.
+az aks get-credentials -g wus3-rdev-rg -n rdev-aks-wus3-1 --overwrite-existing
+kubectl get nodes          # expect Ready nodes before continuing
+
+# 2. Reuse the existing PAT if it has not expired, else mint a new one
+#    (classic, `repo` scope).
+export GH_PAT=ghp_xxxxxxxx
+
+# 3. Controller + CRDs + runner scale set, in one idempotent step.
+./scripts/20-install-arc.sh
+```
+
+Then confirm registration before pushing any code:
+
+```bash
+kubectl -n arc-systems get pods    # controller + arc-rdev-...-listener, both Running
+kubectl get autoscalinglisteners -A
+```
+
+and check `arc-rdev` appears at repo → Settings → Actions → Runners.
+
+### What does not need redoing
+
+| Thing | Why |
+|---|---|
+| GHCR package + its public visibility | Lives on GitHub, not in the cluster |
+| The CI workflow, app, Helm values | Already committed to `master` |
+| GitHub-side runner registration | Recreated by the install script |
+
+The listener pod runs in **`arc-systems`** (the controller's namespace), not
+`arc-runners` — only the ephemeral runner pods appear in `arc-runners`, and only while
+a job is executing. An empty `arc-runners` is the normal idle state, not a fault.
+
 ## Quick reference
 
 ```bash
