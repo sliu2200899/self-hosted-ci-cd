@@ -1,0 +1,65 @@
+# Helm values for the Argo CD chart (argo/argo-cd).
+#
+# Chart 10.3.3 ships Argo CD v3.5.1. Chart version and app version are NOT the
+# same number — always check `helm search repo argo/argo-cd --versions` before
+# bumping, and pin the chart, not the app.
+
+# No SSO is configured, so Dex is a pod doing nothing. These are 2-vCPU nodes
+# shared with CI runners, so unused components are worth switching off.
+dex:
+  enabled: false
+
+# Nothing consumes Argo CD notifications here. Re-enable if Slack/webhook
+# alerting is ever wired up.
+notifications:
+  enabled: false
+
+configs:
+  cm:
+    # Poll interval for git. The default is 3m; this is the knob that decides
+    # how quickly a bump commit becomes a running Deployment.
+    timeout.reconciliation: 180s
+
+controller:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+
+repoServer:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+server:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+  # Left as the default ClusterIP with TLS. Argo CD is reached by port-forward,
+  # so it is never exposed publicly — no LoadBalancer, no public IP, no Ingress.
+  service:
+    type: ClusterIP
+
+redis:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
+applicationSet:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      memory: 256Mi

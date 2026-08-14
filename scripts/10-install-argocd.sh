@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 #
-# Install Argo CD. Idempotent: re-running reconciles the manifests.
+# Install Argo CD via Helm. Idempotent: re-running reconciles the release.
+#
+# Helm rather than the raw manifests, to match how ARC is installed and so
+# configuration lives in a values file instead of post-hoc kubectl patches.
 #
 # See doc/07-argocd.md for what this sets up and why.
 #
@@ -9,30 +12,32 @@
 
 set -euo pipefail
 
-ARGOCD_VERSION="${ARGOCD_VERSION:-v3.5.1}"
+# Chart version, NOT app version. Chart 10.3.3 ships Argo CD v3.5.1.
+CHART_VERSION="${CHART_VERSION:-10.3.3}"
 ARGOCD_NS="${ARGOCD_NS:-argocd}"
+RELEASE="${RELEASE:-argocd}"
 
-MANIFEST="https://raw.githubusercontent.com/argoproj/argo-cd/${ARGOCD_VERSION}/manifests/install.yaml"
+VALUES_FILE="$(dirname "$0")/../platform/argocd/values.yaml"
 
 echo "==> Context: $(kubectl config current-context)"
-echo "==> Installing Argo CD ${ARGOCD_VERSION} into ${ARGOCD_NS}"
 
-kubectl create namespace "${ARGOCD_NS}" --dry-run=client -o yaml | kubectl apply -f -
+echo "==> Adding the argo Helm repo"
+helm repo add argo https://argoproj.github.io/argo-helm >/dev/null
+helm repo update argo >/dev/null
 
-# Server-side apply is required, not a preference. Client-side apply stores the
-# whole manifest in a last-applied-configuration annotation, and the
-# applicationsets CRD schema exceeds the 262144-byte annotation limit:
-#   "metadata.annotations: Too long: may not be more than 262144 bytes"
-kubectl apply --server-side --force-conflicts -n "${ARGOCD_NS}" -f "${MANIFEST}"
-
-echo "==> Waiting for Argo CD to become ready (this pulls several images)"
-# The server is the last thing to come up; waiting on it implies the rest.
-kubectl -n "${ARGOCD_NS}" rollout status deploy/argocd-repo-server --timeout=5m
-kubectl -n "${ARGOCD_NS}" rollout status deploy/argocd-server --timeout=5m
+echo "==> Installing argo-cd chart ${CHART_VERSION} into ${ARGOCD_NS}"
+helm upgrade --install "${RELEASE}" argo/argo-cd \
+  --version "${CHART_VERSION}" \
+  --namespace "${ARGOCD_NS}" \
+  --create-namespace \
+  --values "${VALUES_FILE}" \
+  --wait --timeout 10m
 
 echo
 echo "==> Argo CD is up:"
 kubectl -n "${ARGOCD_NS}" get pods
+echo
+helm list -n "${ARGOCD_NS}"
 
 cat <<'EOF'
 

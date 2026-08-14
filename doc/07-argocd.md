@@ -3,7 +3,7 @@
 Argo CD is the deployment half. It runs **in** the cluster and **pulls** from git —
 nothing ever pushes to the cluster from outside.
 
-Pinned to **v3.5.1**.
+Installed with Helm, chart **argo-cd 10.3.3**, which ships Argo CD **v3.5.1**.
 
 ## Push CD vs pull CD
 
@@ -47,7 +47,7 @@ merge to master
 
 | Piece | Where | Purpose |
 |---|---|---|
-| Argo CD | ns `argocd` | The controller set that reconciles git → cluster |
+| Argo CD (Helm release `argocd`) | ns `argocd` | The controller set that reconciles git → cluster |
 | `Application` `sample-app` | ns `argocd` | Points at `deploy/overlays/dev` on `master` |
 | Deployed workload | ns `sample-app` | Deployment (2 replicas) + ClusterIP Service |
 | Repo credentials | Secret in `argocd` | Read-only SSH deploy key |
@@ -60,18 +60,44 @@ merge to master
 ./scripts/30-bootstrap-app.sh      # create the Application
 ```
 
-### Why server-side apply
+### Why Helm rather than the raw manifests
 
-`10-install-argocd.sh` uses `kubectl apply --server-side`. This is required, not a
-preference — client-side apply stores the entire manifest in a
-`last-applied-configuration` annotation, and the `applicationsets` CRD schema exceeds
-Kubernetes' annotation limit:
+Argo CD's docs lead with `kubectl apply -f manifests/install.yaml`, and that works, but
+Helm was chosen here for three reasons:
+
+1. **Consistency** — ARC is installed with Helm; two install idioms in one repo is one
+   too many.
+2. **Configuration lives in a values file** (`platform/argocd/values.yaml`) instead of
+   post-hoc `kubectl patch` commands that are invisible to the next reader.
+3. **Real upgrades and a clean uninstall.** `helm uninstall argocd` removes everything;
+   unpicking a raw manifest install means deleting by manifest URL and hoping.
+
+It also sidesteps a sharp edge. Installing the raw manifest with plain `kubectl apply`
+fails:
 
 ```
 metadata.annotations: Too long: may not be more than 262144 bytes
 ```
 
-Server-side apply does not use that annotation, so the install succeeds.
+Client-side apply stores the whole manifest in a `last-applied-configuration`
+annotation, and the `applicationsets` CRD schema is larger than the 262144-byte limit.
+The manifest route therefore requires `kubectl apply --server-side`. Helm does not use
+that annotation at all.
+
+> **Chart version ≠ app version.** Chart 10.3.3 ships Argo CD v3.5.1. Before bumping,
+> check the mapping:
+> ```bash
+> helm search repo argo/argo-cd --versions | head
+> ```
+
+### What the values file turns off
+
+`dex` and `notifications` are disabled. No SSO is configured and nothing consumes Argo
+CD notifications, so both would be pods doing nothing — and these are 2-vCPU nodes
+shared with CI runner pods. That takes the install from 7 pods to 5.
+
+Resource requests are set modestly for the same reason. Re-enable either component by
+flipping `enabled: true` in `platform/argocd/values.yaml` and re-running the script.
 
 ## Repository credentials
 
