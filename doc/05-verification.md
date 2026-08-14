@@ -36,7 +36,8 @@ kubectl -n arc-runners get pods -w
 An ephemeral runner pod should appear, run, and disappear. **That pod is the proof CI
 is self-hosted** — this is the single most important observation in Phase 1a.
 
-In the PR's Checks tab: `test` passes, `build-push` is skipped.
+In the PR's Checks tab: `test` passes, then `build` runs and passes. `build` does **not**
+publish here — its summary should read "Build validated — not published (pull request)".
 
 ## 3. Merge to master
 
@@ -44,7 +45,7 @@ Merge the PR. The `push` trigger fires.
 
 ## 4. Build and push
 
-`test` runs again, then `build-push`. In the job log, confirm the push succeeded and
+`test` runs again, then `build` — this time publishing. In the job log, confirm the push succeeded and
 note the `sha-` tag. The job summary lists both tags pushed.
 
 ## 5. Confirm the image exists
@@ -96,8 +97,8 @@ the most likely first-run failure in Phase 1b.
 
 ## Phase 1a is done when
 
-- [ ] A PR runs `test` on a pod in your cluster and skips `build-push`
-- [ ] A merge to `master` runs both jobs
+- [ ] A PR runs `test` and `build` on pods in your cluster, publishing nothing
+- [ ] A merge to `master` runs both jobs and publishes
 - [ ] A `sha-<short-sha>` image tag exists in GHCR matching the merge commit
 - [ ] That image starts and reports the expected version
 - [ ] Runners return to zero when idle

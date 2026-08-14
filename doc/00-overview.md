@@ -23,15 +23,20 @@ Actions produces, so replacing CI does not touch the deployment path at all.
 ## Phase 1a data flow
 
 ```
-open PR ──────> job `test` on an ARC runner pod in AKS ──> pytest
-                                                            │ green
-merge to master ──> job `test` ──> job `build-push` ────────┘
-                                       ├─ docker buildx build (dind sidecar)
-                                       └─ push to GHCR:
-                                          ghcr.io/sliu2200899/self-hosted-ci-cd/sample-app
-                                            :sha-<short>
-                                            :latest
+push to feature branch ──> nothing runs
+
+open / update PR ──> job `test`  ──> job `build`   (build only, NOT published)
+                       pytest          proves the Dockerfile still builds
+
+merge to master ────> job `test`  ──> job `build`   (build AND publish)
+                                         ├─ docker buildx build (dind sidecar)
+                                         └─ push to GHCR:
+                                            ghcr.io/sliu2200899/self-hosted-ci-cd/sample-app
+                                              :sha-<short>
+                                              :latest
 ```
+
+Merging a PR *is* a push to `master` — that is the trigger, not a separate event.
 
 ## Components
 

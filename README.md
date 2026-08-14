@@ -15,12 +15,17 @@ the same cluster.
 ## How it works today
 
 ```
-open PR ──────> job `test` on an ARC runner pod in AKS ──> pytest
-                                                            │ green
-merge to master ──> job `test` ──> job `build-push` ────────┘
-                                       └─ push ghcr.io/sliu2200899/self-hosted-ci-cd/sample-app
+push to feature branch ──> nothing runs
+
+open / update PR ──> `test` ──> `build`   build only, NOT published
+                                          (proves the Dockerfile still builds)
+
+merge to master ────> `test` ──> `build`   build AND push
+                                          ghcr.io/sliu2200899/self-hosted-ci-cd/sample-app
                                             :sha-<short>  :latest
 ```
+
+Both run on ephemeral pods in the cluster. Merging a PR *is* the push to `master`.
 
 CI and CD are decoupled on purpose. The only contract between them is a commit in git
 naming an image tag — which is why Phase 2 can swap out CI without touching deployment.

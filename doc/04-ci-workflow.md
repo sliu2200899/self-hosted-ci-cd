@@ -4,14 +4,27 @@
 
 ## Triggers
 
-| Event | Runs | Purpose |
-|---|---|---|
-| `pull_request` → `master` | `test` only | Gate the merge |
-| `push` → `master` (paths `app/**`, the workflow itself) | `test`, then `build-push` | Publish an image |
+| Event | Runs | Publishes? | Purpose |
+|---|---|---|---|
+| push to a feature branch | nothing | — | Branch work is not CI's concern |
+| `pull_request` → `master` | `test`, then `build` | **no** | Gate the merge; prove the image still builds |
+| `push` → `master` (paths `app/**`, the workflow itself) | `test`, then `build` | **yes** | Publish the image |
+
+**`push` here does not mean "any commit anywhere."** The `branches: [master]` filter
+restricts it to master — and merging a PR *is* how a push to master happens. GitHub has
+no separate "merged" event; the merge commit landing on the branch is the push.
+
+The two runs are not duplicates. The PR run tests the **PR head**; the post-merge run
+tests the **merge commit**, which also contains anything else that landed on `master`
+in the meantime. The second run is what catches "both PRs passed alone but break
+together" — and it is the commit the published image is actually built from.
 
 The `paths` filter on `push` means unrelated commits — docs, scripts, ARC values — do
 not trigger a rebuild. It also becomes load-bearing in Phase 1b, when CI starts writing
 image tags back into `deploy/**`: that write must not retrigger CI.
+
+`pull_request` deliberately has **no** paths filter, so every PR is validated even if it
+only touches docs. PRs are cheap; a wrongly-skipped check is not.
 
 ## The runner image is minimal — assume nothing is installed
 
@@ -52,30 +65,40 @@ as the Dockerfile's base image, so tests run against the interpreter that ships 
 production. Then installs `requirements-dev.txt` (which pulls in the runtime
 requirements via `-r`) and runs `pytest -v` from the `app/` directory.
 
-This is the gate. `build-push` declares `needs: test`, so a red test means no image is
-ever published.
+This is the gate. `build` declares `needs: test`, so a red test means no image is ever
+built, let alone published.
 
-## Job `build-push`
+## Job `build`
 
-Guarded twice:
+Runs on **both** events. What changes is whether it publishes:
 
 ```yaml
-needs: test
-if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+push: ${{ github.event_name == 'push' }}
 ```
 
-**Why never on `pull_request`:** a fork PR receives a read-only `GITHUB_TOKEN` and
-could not push regardless — but more importantly, we do not want unreviewed PR code
-producing published images.
+That single line separates **validation** from **publication**:
+
+- On a **PR**, the image is built and thrown away. This catches a broken Dockerfile
+  before the merge rather than after — a failure mode tests alone cannot detect, since
+  the app can be perfectly healthy while the image fails to build.
+- On **push to master**, the same build is published.
+
+The GHCR login step is skipped on PRs (`if: github.event_name == 'push'`). Nothing is
+published there, so no credentials are needed — which also keeps **fork PRs** working,
+where `GITHUB_TOKEN` is read-only and a GHCR login would fail outright.
 
 Steps:
 
-1. `docker/login-action` → `ghcr.io`, authenticating with the built-in
-   `secrets.GITHUB_TOKEN`. Nothing to create, nothing to rotate. This works because the
-   job declares `permissions: packages: write`.
+1. `docker/login-action` → `ghcr.io` with the built-in `secrets.GITHUB_TOKEN`. Nothing
+   to create, nothing to rotate. Works because the job declares `permissions:
+   packages: write`. **Push events only.**
 2. `docker/setup-buildx-action` → BuildKit, talking to the dind sidecar.
 3. Derive `sha-<short-sha>` from `git rev-parse --short HEAD`.
-4. `docker/build-push-action` with context `./app`, pushing two tags.
+4. `docker/build-push-action` with context `./app`, building both tags and pushing only
+   on master.
+
+A useful side effect: the PR build populates the layer cache, so the post-merge publish
+is mostly re-tagging layers that were already built.
 
 ## Image tags
 

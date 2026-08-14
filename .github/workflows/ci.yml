@@ -1,8 +1,14 @@
 name: CI
 
-# A pull request runs tests only. A merge to master runs tests and then builds
-# and pushes the image. CI's output is an image in GHCR — nothing more; the
-# deployment half (Argo CD) is Phase 1b.
+# Pushing to a feature branch runs nothing. Opening or updating a PR runs tests
+# and builds the image to prove it still builds — but does not publish it.
+# Merging produces a push to master, which runs everything and publishes.
+#
+# `push` here is not "any commit anywhere" — the branches filter restricts it to
+# master, and merging a PR is precisely how a push to master happens.
+#
+# CI's output is an image in GHCR — nothing more; the deployment half (Argo CD)
+# is Phase 1b.
 on:
   pull_request:
     branches: [master]
@@ -48,19 +54,23 @@ jobs:
         working-directory: app
         run: pytest -v
 
-  build-push:
+  build:
     needs: test
     runs-on: arc-rdev
-    # Never on pull_request: a fork PR's GITHUB_TOKEN is read-only and could not
-    # push anyway, and we do not want PR code producing published images.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    # Runs on BOTH events, but only publishes on push to master. On a PR this is
+    # build validation: it proves the Dockerfile still builds before the merge,
+    # without publishing an image from unreviewed code.
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@v4
 
+      # Skipped on PRs — nothing is published, so no credentials are needed.
+      # This also keeps fork PRs working, where GITHUB_TOKEN is read-only and a
+      # GHCR login would fail.
       - name: Log in to GHCR
+        if: github.event_name == 'push'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -76,18 +86,25 @@ jobs:
         run: |
           echo "sha_tag=sha-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Build and push
+      - name: Build (and push on master)
         uses: docker/build-push-action@v6
         with:
           context: ./app
-          push: true
+          # The one line that separates validation from publication.
+          push: ${{ github.event_name == 'push' }}
           tags: |
             ${{ env.IMAGE }}:${{ steps.meta.outputs.sha_tag }}
             ${{ env.IMAGE }}:latest
+          # PR builds populate the cache that the post-merge build then reuses,
+          # so publishing is fast and mostly re-tags already-built layers.
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Summarise
         run: |
-          echo "Pushed \`${{ env.IMAGE }}:${{ steps.meta.outputs.sha_tag }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "Pushed \`${{ env.IMAGE }}:latest\`" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "Pushed \`${{ env.IMAGE }}:${{ steps.meta.outputs.sha_tag }}\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "Pushed \`${{ env.IMAGE }}:latest\`" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Build validated — not published (pull request)." >> "$GITHUB_STEP_SUMMARY"
+          fi
