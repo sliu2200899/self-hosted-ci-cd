@@ -8,9 +8,14 @@ the same cluster.
 
 | Phase | Scope | Status |
 |---|---|---|
-| **1a** | CI — Actions jobs on self-hosted ARC runners in AKS → image in GHCR | in progress |
+| **1a** | CI — Actions jobs on self-hosted ARC runners in AKS → image in GHCR | **done** |
 | **1b** | CD — Argo CD deploys that image | not started |
 | **2** | Buildkite agents replace the Actions half of CI | not started |
+
+Verified end to end: a push to a feature branch runs nothing, a PR runs tests and
+builds the image without publishing, and merging to `master` runs both and publishes
+`sha-<short>` to GHCR. Every job executes in an ephemeral pod in the cluster, and
+runners scale back to zero when idle.
 
 ## How it works today
 
