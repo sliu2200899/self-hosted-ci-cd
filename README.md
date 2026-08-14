@@ -45,17 +45,56 @@ scripts/              Repeatable install scripts
 doc/                  Documentation
 ```
 
-## Getting started
+## Setting up CI on a fresh cluster
+
+Everything CI needs is either committed here or lives outside the cluster, so a rebuild
+after teardown is three commands. **There is no separate CRD step** — the four
+`actions.github.com` CRDs ship with the controller chart.
 
 ```bash
+# 0. Once per machine
 brew install helm
-az aks get-credentials -g wus3-rdev-rg -n rdev-aks-wus3-1 --overwrite-existing
 
-export GH_PAT=<classic PAT with repo scope>
+# 1. Point kubectl at the cluster. Mandatory after any recreate: the AKS API server
+#    FQDN contains a random suffix that changes, so the previous context is dead
+#    and fails with "no such host".
+az aks get-credentials -g wus3-rdev-rg -n rdev-aks-wus3-1 --overwrite-existing
+kubectl get nodes                      # expect Ready nodes before continuing
+
+# 2. Reuse the existing PAT if it has not expired, else mint a new one:
+#    GitHub → Settings → Developer settings → Tokens (classic), scope `repo`.
+export GH_PAT=ghp_xxxxxxxx
+
+# 3. Controller + CRDs + the arc-rdev runner scale set. Idempotent.
 ./scripts/20-install-arc.sh
 ```
 
-Then follow [doc/05-verification.md](doc/05-verification.md).
+### Verify before pushing any code
+
+A job queued against a label no runner provides waits forever with no error, so confirm
+registration first:
+
+```bash
+kubectl -n arc-systems get pods        # controller AND arc-rdev-...-listener, both Running
+kubectl get autoscalinglisteners -A
+```
+
+and check `arc-rdev` is listed at repo → Settings → Actions → Runners.
+
+> The listener runs in **`arc-systems`**, not `arc-runners`. Only ephemeral runner pods
+> appear in `arc-runners`, and only while a job is executing — an empty `arc-runners`
+> is the normal idle state, not a fault.
+
+### What does not need redoing
+
+| Thing | Why |
+|---|---|
+| GHCR package and its public visibility | Lives on GitHub, not in the cluster |
+| CI workflow, app, Helm values | Already committed to `master` |
+| GitHub-side runner registration | Recreated by the install script |
+
+Then follow [doc/05-verification.md](doc/05-verification.md) for the PR round trip, or
+[doc/06-runbook.md](doc/06-runbook.md) when something misbehaves.
 
 ## Documentation
 
