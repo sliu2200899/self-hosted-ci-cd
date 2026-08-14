@@ -1,0 +1,39 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: sample-app
+  namespace: argocd
+  finalizers:
+    # Deleting this Application also deletes what it deployed. Without this,
+    # `kubectl delete application` orphans the workloads in sample-app.
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    # SSH form, because Argo CD authenticates with a read-only deploy key.
+    # This MUST match the `url` in the repository Secret exactly, or Argo CD
+    # will not associate the credentials with the repo and clones fail.
+    repoURL: git@github.com:sliu2200899/self-hosted-ci-cd.git
+    targetRevision: master
+    path: deploy/overlays/dev
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: sample-app
+
+  syncPolicy:
+    automated:
+      # Delete resources removed from git, rather than leaving orphans behind.
+      prune: true
+      # Revert manual kubectl changes. This is what makes git the source of
+      # truth instead of merely the starting point.
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

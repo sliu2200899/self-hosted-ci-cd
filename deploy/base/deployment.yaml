@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sample-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: sample-app
+  template:
+    metadata:
+      labels:
+        app: sample-app
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          # The tag here is a placeholder. The dev overlay pins the real one, and
+          # CI rewrites it on every merge to master — that single field is the
+          # entire contract between CI and CD.
+          image: ghcr.io/sliu2200899/self-hosted-ci-cd/sample-app:latest
+          ports:
+            - name: http
+              containerPort: 8000
+          # Liveness restarts a wedged process; readiness pulls a pod out of the
+          # Service until it can serve. Both hit /healthz, which has no
+          # dependencies, so a probe failure means the process itself is unwell.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            # Deliberately small: these are 2-vCPU nodes shared with CI runner
+            # pods, and two replicas must fit alongside a running build.
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 192Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            # readOnlyRootFilesystem leaves nowhere writable; uvicorn and the
+            # stdlib expect a usable /tmp.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
