@@ -4,7 +4,7 @@ kind: Kustomization
 namespace: sample-app
 
 resources:
-  - ../../base
+- ../../base
 
 # ─────────────────────────────────────────────────────────────────────────────
 # THE CI → CD CONTRACT
@@ -23,5 +23,6 @@ resources:
 # the commit that changed this line).
 # ─────────────────────────────────────────────────────────────────────────────
 images:
-  - name: ghcr.io/sliu2200899/self-hosted-ci-cd/sample-app
-    newTag: sha-55f6609
+- name: ghcr.io/sliu2200899/self-hosted-ci-cd/sample-app
+  newName: ghcr.io/sliu2200899/self-hosted-ci-cd/sample-app
+  newTag: sha-354ac75
